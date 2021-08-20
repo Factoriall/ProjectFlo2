@@ -29,6 +29,24 @@ class StorageUtil(private val context: Context) {
         return gson.fromJson(json, type)
     }
 
+    fun storePlayingInfo(isPlaying: Boolean, seekTime: Int){
+        preferences = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE)
+        val editor = preferences!!.edit()
+        editor.putBoolean("isPlaying", isPlaying)
+        editor.putInt("seekTime", seekTime)
+        editor.apply()
+    }
+
+    fun loadIsPlaying() : Boolean{
+        preferences = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE)
+        return preferences!!.getBoolean("isPlaying", false) //return -1 if no data found
+    }
+
+    fun loadSeekTime() : Int{
+        preferences = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE)
+        return preferences!!.getInt("seekTime", 0)
+    }
+
     fun storeAudioIndex(index: Int) {
         preferences = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE)
         val editor = preferences!!.edit()

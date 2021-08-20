@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.graphics.Color
 import android.os.Build
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
@@ -17,11 +18,8 @@ import android.widget.TextView
 import androidx.constraintlayout.widget.ConstraintLayout
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import kotlinx.coroutines.Dispatchers.Main
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.json.JSONTokener
 import org.techtown.projectflo2.MediaPlayerService.Companion.CHANNEL_ID
@@ -31,10 +29,20 @@ import java.net.URL
 class MainActivity : AppCompatActivity() {
     private val urlName =
         "https://grepp-programmers-challenges.s3.ap-northeast-2.amazonaws.com/2020-flo/song.json"
-    private val Broadcast_PLAY_NEW_AUDIO = "org.techtown.projectflo2"
+    companion object {
+        const val Broadcast_PLAY = "org.techtown.projectflo2.PLAY"
+        const val Broadcast_RESUME = "org.techtown.projectflo2.RESUME"
+        const val Broadcast_PAUSE = "org.techtown.projectflo2.PAUSE"
+        const val Broadcast_SEEK_TO_PLAY = "org.techtown.projectflo2.SEEK_TO_PLAY"
+        const val Broadcast_SEEK_TO_PAUSE = "org.techtown.projectflo2.SEEK_TO_PAUSE"
+    }
 
     private lateinit var player : MediaPlayerService
     var serviceBound = false
+    var isPlaying = false
+    var seekTime = 0
+    var updateJob: Job? = null
+
 
     private var musicList = arrayListOf<Music>()
 
@@ -82,6 +90,12 @@ class MainActivity : AppCompatActivity() {
         nextLyrics = findViewById(R.id.nextLyrics)
         controlButton = findViewById(R.id.controlButton)
         lyricsLayout = findViewById(R.id.lyricsLayout)
+
+        controlButton.setOnClickListener {
+            controlAudio(0, false)
+            if(!isPlaying) onTrackPlay()
+            else onTrackPause()
+        }
     }
 
     private fun loadMusic(){
@@ -116,7 +130,6 @@ class MainActivity : AppCompatActivity() {
             )
 
             withContext(Main){
-                playAudio(0)
                 setMusicView(0)
             }
             //dialog.dismiss()
@@ -132,6 +145,45 @@ class MainActivity : AppCompatActivity() {
         mainLyrics.text = musicList[idx].musicLyrics[0].lyrics
         nextLyrics.text = musicList[idx].musicLyrics[1].lyrics
         albumImage.setImageBitmap(musicList[idx].image)
+
+        musicSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(p0: SeekBar?, value: Int, p2: Boolean) {
+                seekTime = value * 1000
+                songNow.text = getTimeFormatFromSecs(value)
+            }
+
+            override fun onStartTrackingTouch(p0: SeekBar?) {
+                updateJob?.cancel()
+            }
+
+            override fun onStopTrackingTouch(p0: SeekBar?) {
+                controlAudio(0, true)
+                //setLyricsText()
+
+                if (isPlaying) {
+                    startSeekbarThread()
+                }
+            }
+        })
+    }
+
+    private fun startSeekbarThread() {
+        updateJob?.cancel()
+        updateJob = updateSeekbar()
+    }
+
+    private fun updateSeekbar(): Job {
+        return CoroutineScope(Dispatchers.IO).launch {
+            while (true) {
+                delay(1000)
+
+                withContext(Main) {
+                    musicSeekBar.progress += 1
+                }
+                //setLyricsText()
+
+            }
+        }
     }
 
     private fun getLyricsArray(lyrics: String): List<MusicLyrics> {
@@ -162,6 +214,16 @@ class MainActivity : AppCompatActivity() {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
             val binder = service as MediaPlayerService.LocalBinder
             player = binder.getService()
+            player.playPauseListener = { wasPlaying ->
+                if(wasPlaying) onTrackPause()
+                else onTrackPlay()
+            }
+            player.onCompleteListener = {
+                musicSeekBar.progress = 0
+                seekTime = 0
+                isPlaying = false
+                onTrackPause()
+            }
             serviceBound = true
         }
 
@@ -170,11 +232,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun playAudio(idx : Int){
+    private fun controlAudio(idx : Int, isSeeking : Boolean){
         if(!serviceBound){//서비스가 active하지 않다면
             val storage = StorageUtil(applicationContext)
             storage.storeAudio(musicList)
             storage.storeAudioIndex(idx)
+            storage.storePlayingInfo(isPlaying, seekTime)
 
             if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 createChannel()
@@ -187,10 +250,36 @@ class MainActivity : AppCompatActivity() {
         else{//BroadcastReceiver 통해
             val storage = StorageUtil(applicationContext)
             storage.storeAudioIndex(idx)
+            storage.storePlayingInfo(isPlaying, seekTime)
 
-            val broadcastIntent = Intent(Broadcast_PLAY_NEW_AUDIO)
+            val broadcastIntent : Intent =
+                if(!isSeeking) {
+                    if (!isPlaying){
+                        if(seekTime == 0) Intent(Broadcast_PLAY)
+                        else Intent(Broadcast_RESUME)
+                    }
+                    else Intent(Broadcast_PAUSE)
+                }
+                else{
+                    Log.d("broadcastIntent", "touch seekbar")
+                    if (isPlaying) Intent(Broadcast_SEEK_TO_PLAY)
+                    else Intent(Broadcast_SEEK_TO_PAUSE)
+                }
+
             sendBroadcast(broadcastIntent)
         }
+    }
+
+    fun onTrackPlay() {
+        isPlaying = true
+        controlButton.setImageResource(R.drawable.ic_pause)
+        startSeekbarThread()
+    }
+
+    fun onTrackPause() {
+        isPlaying = false
+        controlButton.setImageResource(R.drawable.ic_play)
+        updateJob?.cancel()
     }
 
     private fun createChannel() {

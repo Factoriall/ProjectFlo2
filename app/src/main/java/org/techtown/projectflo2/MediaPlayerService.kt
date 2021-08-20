@@ -16,7 +16,6 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.RemoteException
-import android.provider.MediaStore
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaControllerCompat
 import android.support.v4.media.session.MediaSessionCompat
@@ -25,7 +24,6 @@ import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.io.IOException
-import java.lang.NullPointerException
 
 
 class MediaPlayerService : Service(),
@@ -36,6 +34,8 @@ class MediaPlayerService : Service(),
     MediaPlayer.OnInfoListener,
     MediaPlayer.OnBufferingUpdateListener,
     AudioManager.OnAudioFocusChangeListener{
+    var playPauseListener: ( (Boolean) -> Unit )? = null
+    var onCompleteListener: ( () -> Unit )? = null
 
     companion object{
         const val ACTION_PLAY = "org.techtown.projectflo2.ACTION_PLAY"
@@ -60,6 +60,7 @@ class MediaPlayerService : Service(),
 
     private var musicList = arrayListOf<Music>()
     private var mIdx = -1
+    private var isPlaying = false
     private lateinit var activeMusic : Music
 
     private val becomingNoisyReceiver = object : BroadcastReceiver(){
@@ -69,26 +70,74 @@ class MediaPlayerService : Service(),
         }
     }
 
-    //서비스가 시행 중에 새로운 track을 발견하면 음악을 교체해야 됨
-    private val playNewMusic = object: BroadcastReceiver(){
+    private val startMusic = object: BroadcastReceiver(){
         override fun onReceive(p0: Context, p1: Intent) {
-            mIdx = StorageUtil(applicationContext).loadAudioIndex()
-            if(mIdx != -1 && mIdx < musicList.size)
-                activeMusic = musicList[mIdx]
-            else stopSelf()
 
-            stopMedia()
-            mediaPlayer!!.reset()
-            initMediaPlayer()
-            updateMetaData()
+            playMedia()
             buildNotification(PlaybackStatus.PLAYING)
         }
     }
 
+    private val resumeMusic = object: BroadcastReceiver(){
+        override fun onReceive(p0: Context, p1: Intent) {
+            Log.d("MediaPlayerReceiver", "resumeMusic method")
+
+            resumeMedia()
+            buildNotification(PlaybackStatus.PLAYING)
+        }
+    }
+
+    //서비스가 시행 중에 pause 신호가 오면 잠시 멈춤
+    private val pauseMusic = object: BroadcastReceiver(){
+        override fun onReceive(p0: Context, p1: Intent) {
+            Log.d("MediaPlayerReceiver", "pause method")
+
+            pauseMedia()
+            buildNotification(PlaybackStatus.PAUSE)
+        }
+    }
+
+    private val seekToPlayMusic = object: BroadcastReceiver(){
+        override fun onReceive(p0: Context, p1: Intent) {
+            val storage = StorageUtil(applicationContext)
+
+            resumePos = storage.loadSeekTime()
+            resumeMedia()
+            buildNotification(PlaybackStatus.PLAYING)
+        }
+    }
+
+    private val seekToPauseMusic = object: BroadcastReceiver(){
+        override fun onReceive(p0: Context, p1: Intent) {
+            val storage = StorageUtil(applicationContext)
+
+            resumePos = storage.loadSeekTime()
+        }
+    }
+
     //등록
-    private fun registerPlayNewAudio(){
-        val filter = IntentFilter("org.techtown.projectflo2")
-        registerReceiver(playNewMusic, filter)
+    private fun registerStartAudio(){
+        val filter = IntentFilter(MainActivity.Broadcast_PLAY)
+        registerReceiver(startMusic, filter)
+    }
+    private fun registerResumeAudio(){
+        val filter = IntentFilter(MainActivity.Broadcast_RESUME)
+        registerReceiver(resumeMusic, filter)
+    }
+
+    private fun registerPauseAudio(){
+        val filter = IntentFilter(MainActivity.Broadcast_PAUSE)
+        registerReceiver(pauseMusic, filter)
+    }
+
+    private fun registerSeekToPlayAudio(){
+        val filter = IntentFilter(MainActivity.Broadcast_SEEK_TO_PLAY)
+        registerReceiver(seekToPlayMusic, filter)
+    }
+
+    private fun registerSeekToPauseAudio(){
+        val filter = IntentFilter(MainActivity.Broadcast_SEEK_TO_PAUSE)
+        registerReceiver(seekToPauseMusic, filter)
     }
 
     override fun onBind(p0: Intent): IBinder {
@@ -116,12 +165,15 @@ class MediaPlayerService : Service(),
                 e.printStackTrace()
                 stopSelf()
             }
-            buildNotification(PlaybackStatus.PLAYING)
+
+            if(isPlaying) buildNotification(PlaybackStatus.PAUSE)
+            else buildNotification(PlaybackStatus.PLAYING)
         }
         handleIncomingAction(intent)
 
         return super.onStartCommand(intent, flags, startId)
     }
+
 
     override fun onCreate() {
         super.onCreate()
@@ -130,7 +182,11 @@ class MediaPlayerService : Service(),
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         callStateListener()//전화 관련 listener 등록
         registerBecomingNoisyReceiver()//receiver 등록
-        registerPlayNewAudio()
+        registerStartAudio()
+        registerResumeAudio()
+        registerPauseAudio()
+        registerSeekToPauseAudio()
+        registerSeekToPlayAudio()
     }
 
     //service 종료 시 호출, mediaPlayer release 필요
@@ -151,7 +207,11 @@ class MediaPlayerService : Service(),
         removeNotification()
 
         unregisterReceiver(becomingNoisyReceiver)
-        unregisterReceiver(playNewMusic)
+        unregisterReceiver(startMusic)
+        unregisterReceiver(resumeMusic)
+        unregisterReceiver(pauseMusic)
+        unregisterReceiver(seekToPauseMusic)
+        unregisterReceiver(seekToPlayMusic)
 
         //캐시 데이터 삭제
         StorageUtil(applicationContext).clearCachedAudioPlaylist()
@@ -278,12 +338,15 @@ class MediaPlayerService : Service(),
         val actionString = playbackAction.action
         when {
             actionString.equals(ACTION_PLAY, ignoreCase = true) -> {
+                playPauseListener?.invoke(false)
                 transportControls.play()
             }
             actionString.equals(ACTION_PAUSE, ignoreCase = true) -> {
+                playPauseListener?.invoke(true)
                 transportControls.pause()
             }
             actionString.equals(ACTION_STOP, ignoreCase = true) -> {
+                playPauseListener?.invoke(true)
                 transportControls.stop()
             }
         }
@@ -317,8 +380,8 @@ class MediaPlayerService : Service(),
     }
 
     private fun resumeMedia(){
+        mediaPlayer!!.seekTo(resumePos)
         if(!mediaPlayer!!.isPlaying){
-            mediaPlayer!!.seekTo(resumePos)
             mediaPlayer!!.start()
         }
     }
@@ -327,6 +390,8 @@ class MediaPlayerService : Service(),
         //노래가 다 끝났을 때 발동
         stopMedia()
         stopSelf()//서비스 종료
+        buildNotification(PlaybackStatus.PLAYING)
+        onCompleteListener?.invoke()
     }
 
     override fun onPrepared(p0: MediaPlayer?) {

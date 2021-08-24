@@ -6,6 +6,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Build
 import androidx.appcompat.app.AppCompatActivity
@@ -35,16 +37,17 @@ class MainActivity : AppCompatActivity() {
         const val Broadcast_PAUSE = "org.techtown.projectflo2.PAUSE"
         const val Broadcast_SEEK_TO_PLAY = "org.techtown.projectflo2.SEEK_TO_PLAY"
         const val Broadcast_SEEK_TO_PAUSE = "org.techtown.projectflo2.SEEK_TO_PAUSE"
+
+        private var player : MediaPlayerService? = null
+        var isPlaying = false
+        var updateJob: Job? = null
+        var seekTime : Int = 0
     }
 
-    private lateinit var player : MediaPlayerService
     var serviceBound = false
-    var isPlaying = false
-    var seekTime = 0
-    var updateJob: Job? = null
-
 
     private var musicList = arrayListOf<Music>()
+    private var bitmapList = arrayListOf<Bitmap>()
 
     private lateinit var songTitle: TextView
     private lateinit var albumImage: ImageView
@@ -59,26 +62,56 @@ class MainActivity : AppCompatActivity() {
     private lateinit var lyricsLayout: ConstraintLayout
     private lateinit var notificationManager : NotificationManager
 
+    private lateinit var image : Bitmap
+
     //serviceBound에 대한 데이터 저장
     override fun onSaveInstanceState(savedInstanceState: Bundle) {
+        Log.d("LifecycleCheck", "onSaveInstanceState")
+
         savedInstanceState.putBoolean("ServiceState", serviceBound)
         super.onSaveInstanceState(savedInstanceState)
+        updateJob?.cancel()
     }
 
+
     override fun onRestoreInstanceState(savedInstanceState: Bundle) {
-        super.onRestoreInstanceState(savedInstanceState)
+        Log.d("LifecycleCheck", "onRestoreInstanceState")
+
         serviceBound = savedInstanceState.getBoolean("ServiceState")
+        if (isPlaying) controlButton.setImageResource(R.drawable.ic_pause)
+        else controlButton.setImageResource(R.drawable.ic_play)
+        musicList = StorageUtil(applicationContext).loadAudio()
+        image = StorageUtil(applicationContext).loadImage(0)
+
+        if (isPlaying) startSeekbarThread()
+        setMusicView(0)
+
+        player!!.playPauseListener = { wasPlaying ->
+            if (wasPlaying) onTrackPause()
+            else onTrackPlay()
+            Log.d("lifecycle", "playPauseListener")
+        }
+        player!!.onCompleteListener = {
+            musicSeekBar.progress = 0
+            seekTime = 0
+            isPlaying = false
+            onTrackPause()
+            Log.d("lifecycle", "onCompleteListener")
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Log.d("LifecycleCheck", "onCreate")
+
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         initView()
-        loadMusic()
+        if(savedInstanceState == null) loadMusic()
     }
 
     private fun initView(){
+        Log.d("LifecycleCheck", "initView")
         songTitle = findViewById(R.id.songTitle)
         albumImage = findViewById(R.id.albumImage)
         singerName = findViewById(R.id.singerName)
@@ -99,6 +132,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadMusic(){
+        Log.d("LifecycleCheck", "loadMusic")
         val url: URL? = try {
             URL(urlName)
         } catch (e: MalformedURLException) {
@@ -106,10 +140,12 @@ class MainActivity : AppCompatActivity() {
             null
         }
 
+
         CoroutineScope(Dispatchers.IO).launch {
             val jsonResponse = url?.readText()
             val jsonObject = JSONTokener(jsonResponse).nextValue() as JSONObject
-            val image = Glide
+
+            image = Glide
                 .with(baseContext)
                 .asBitmap()
                 .load(jsonObject.getString("image"))
@@ -117,6 +153,8 @@ class MainActivity : AppCompatActivity() {
                 .skipMemoryCache(true)
                 .submit()
                 .get()
+            bitmapList.add(image)
+
             musicList.add(
                 Music(
                 urlName,
@@ -125,8 +163,7 @@ class MainActivity : AppCompatActivity() {
                 jsonObject.getString("album"),
                 getLyricsArray(jsonObject.getString("lyrics")),
                 jsonObject.getInt("duration"),
-                jsonObject.getString("file"),
-                image)
+                jsonObject.getString("file"))
             )
 
             withContext(Main){
@@ -137,6 +174,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setMusicView(idx : Int) {
+        Log.d("LifecycleCheck", "setMusicView")
         songTitle.text = musicList[idx].songName
         singerName.text = musicList[idx].singerName
         albumName.text = musicList[idx].albumName
@@ -144,7 +182,7 @@ class MainActivity : AppCompatActivity() {
         musicSeekBar.max = musicList[idx].duration
         mainLyrics.text = musicList[idx].musicLyrics[0].lyrics
         nextLyrics.text = musicList[idx].musicLyrics[1].lyrics
-        albumImage.setImageBitmap(musicList[idx].image)
+        albumImage.setImageBitmap(image)
 
         musicSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(p0: SeekBar?, value: Int, p2: Boolean) {
@@ -158,7 +196,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onStopTrackingTouch(p0: SeekBar?) {
                 controlAudio(0, true)
-                //setLyricsText()
+                setLyricsText(0)
 
                 if (isPlaying) {
                     startSeekbarThread()
@@ -167,26 +205,8 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun startSeekbarThread() {
-        updateJob?.cancel()
-        updateJob = updateSeekbar()
-    }
-
-    private fun updateSeekbar(): Job {
-        return CoroutineScope(Dispatchers.IO).launch {
-            while (true) {
-                delay(1000)
-
-                withContext(Main) {
-                    musicSeekBar.progress += 1
-                }
-                //setLyricsText()
-
-            }
-        }
-    }
-
     private fun getLyricsArray(lyrics: String): List<MusicLyrics> {
+        Log.d("LifecycleCheck", "getLyricsArray")
         val musicLyrics = mutableListOf<MusicLyrics>()
         val musicArr = lyrics.split("\n")
         for (mLine in musicArr) {
@@ -202,6 +222,71 @@ class MainActivity : AppCompatActivity() {
         return musicLyrics
     }
 
+    private fun setLyricsText(idx : Int) {
+        Log.d("LifecycleCheck", "setLyricsText")
+
+        val musicLyrics = musicList[idx].musicLyrics
+        var isFirst = true
+        for (mIdx in musicLyrics.indices.reversed()) {
+            val now = musicLyrics[mIdx]
+            if (now.startTime >= seekTime) continue
+            Log.d("setLyricsText", "" + now.startTime + " " + seekTime)
+
+            isFirst = false
+            CoroutineScope(Main).launch {
+                setLyricsTextView(now, mIdx, idx)
+            }
+            break
+        }
+
+        if(isFirst){
+            CoroutineScope(Main).launch {
+                mainLyrics.setTextColor(Color.GRAY)
+                mainLyrics.text = musicLyrics[0].lyrics
+                nextLyrics.text = musicLyrics[1].lyrics
+            }
+        }
+    }
+
+    private fun setLyricsTextView(now: MusicLyrics, mIdx: Int, idx: Int) {
+        Log.d("LifecycleCheck", "setLyricsTextView")
+
+        mainLyrics.setTextColor(Color.BLUE)
+        mainLyrics.text = now.lyrics
+        nextLyrics.text =
+            if (mIdx != musicList[idx].musicLyrics.size - 1) musicList[idx].musicLyrics[mIdx + 1].lyrics
+            else ""
+    }
+
+    private fun startSeekbarThread() {
+        updateJob?.cancel()
+        updateJob = updateSeekbar()
+    }
+
+    private fun updateSeekbar(): Job {
+        Log.d("LifecycleCheck", "updateSeekbar")
+
+        return CoroutineScope(Dispatchers.IO).launch {
+            val isPlayerNull = (player == null)
+            while (true) {
+                if(isPlayerNull) seekTime += 500
+                else{
+                    val playerTime = player!!.getCurrentTime()
+                    if(playerTime - 1000 > seekTime || playerTime + 1000 < seekTime) seekTime += 500
+                    else seekTime = playerTime
+                }
+                Log.d("updateSeekbar", "time: $seekTime")
+
+                withContext(Main) {
+                    musicSeekBar.progress = seekTime / 1000
+                }
+
+                setLyricsText(0)
+                delay(500)
+            }
+        }
+    }
+
     private fun getTimeFormatFromSecs(duration: Int): CharSequence {
         val minutes: Int = duration / 60
         val seconds: Int = duration % 60
@@ -214,29 +299,34 @@ class MainActivity : AppCompatActivity() {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
             val binder = service as MediaPlayerService.LocalBinder
             player = binder.getService()
-            player.playPauseListener = { wasPlaying ->
+            player!!.playPauseListener = { wasPlaying ->
                 if(wasPlaying) onTrackPause()
                 else onTrackPlay()
+                Log.d("lifecycle", "playPauseListener")
             }
-            player.onCompleteListener = {
+            player!!.onCompleteListener = {
                 musicSeekBar.progress = 0
                 seekTime = 0
                 isPlaying = false
                 onTrackPause()
+                Log.d("lifecycle", "onCompleteListener")
             }
             serviceBound = true
         }
 
         override fun onServiceDisconnected(p0: ComponentName?) {
+            Log.d("onService","Service disconnected")
             serviceBound = false
         }
     }
 
     private fun controlAudio(idx : Int, isSeeking : Boolean){
         if(!serviceBound){//서비스가 active하지 않다면
+            Log.d("LifecycleCheck", "startService")
             val storage = StorageUtil(applicationContext)
             storage.storeAudio(musicList)
             storage.storeAudioIndex(idx)
+            storage.storeImages(bitmapList)
             storage.storePlayingInfo(isPlaying, seekTime)
 
             if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -245,9 +335,11 @@ class MainActivity : AppCompatActivity() {
 
             val playerIntent = Intent(this, MediaPlayerService::class.java)
             startService(playerIntent)
-            bindService(playerIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+            applicationContext.bindService(playerIntent, serviceConnection, Context.BIND_AUTO_CREATE)
         }
         else{//BroadcastReceiver 통해
+            Log.d("LifecycleCheck", "broadcastReceiver")
+
             val storage = StorageUtil(applicationContext)
             storage.storeAudioIndex(idx)
             storage.storePlayingInfo(isPlaying, seekTime)
@@ -265,21 +357,8 @@ class MainActivity : AppCompatActivity() {
                     if (isPlaying) Intent(Broadcast_SEEK_TO_PLAY)
                     else Intent(Broadcast_SEEK_TO_PAUSE)
                 }
-
             sendBroadcast(broadcastIntent)
         }
-    }
-
-    fun onTrackPlay() {
-        isPlaying = true
-        controlButton.setImageResource(R.drawable.ic_pause)
-        startSeekbarThread()
-    }
-
-    fun onTrackPause() {
-        isPlaying = false
-        controlButton.setImageResource(R.drawable.ic_play)
-        updateJob?.cancel()
     }
 
     private fun createChannel() {
@@ -296,12 +375,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    fun onTrackPlay() {
+        Log.d("LifecycleCheck", "onTrackPlay")
+        isPlaying = true
+        Log.d("LifecycleCheck", "isPlaying: $isPlaying")
+        controlButton.setImageResource(R.drawable.ic_pause)
+        startSeekbarThread()
+    }
+
+    fun onTrackPause() {
+        Log.d("LifecycleCheck", "onTrackPause")
+        isPlaying = false
+        controlButton.setImageResource(R.drawable.ic_play)
+        updateJob?.cancel()
+    }
+
     override fun onDestroy() {
+        Log.d("LifecycleCheck", "onDestroy")
+
         super.onDestroy()
-        if (serviceBound) {
-            unbindService(serviceConnection)
-            //service is active
-            player.stopSelf()
+        if (isFinishing && serviceBound) {
+            applicationContext.unbindService(serviceConnection)
+            serviceBound = false
+            player!!.stopSelf()
         }
     }
 }

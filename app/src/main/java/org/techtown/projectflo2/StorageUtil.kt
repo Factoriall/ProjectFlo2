@@ -2,10 +2,17 @@ package org.techtown.projectflo2
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.Bitmap
 
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import java.io.ByteArrayOutputStream
 import java.lang.reflect.Type
+import java.util.*
+import kotlin.collections.ArrayList
+import android.graphics.BitmapFactory
+import android.util.Base64.*
+import android.util.Log
 
 
 class StorageUtil(private val context: Context) {
@@ -16,10 +23,13 @@ class StorageUtil(private val context: Context) {
         preferences = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE)
         val editor = preferences!!.edit()
         val gson = Gson()
+
         val json: String = gson.toJson(arrayList)
         editor.putString("audioArrayList", json)
         editor.apply()
     }
+
+
 
     fun loadAudio(): ArrayList<Music> {
         preferences = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE)
@@ -27,6 +37,29 @@ class StorageUtil(private val context: Context) {
         val json = preferences!!.getString("audioArrayList", null)
         val type: Type = object : TypeToken<ArrayList<Music>>(){}.type
         return gson.fromJson(json, type)
+    }
+
+    fun storeImages(bmpList: ArrayList<Bitmap>){
+        preferences = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE)
+        val editor = preferences!!.edit()
+
+
+        val stream = ByteArrayOutputStream()
+        for((idx, bmp) in bmpList.withIndex()) {
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            val b: ByteArray = stream.toByteArray()
+            val encodedImage: String = encodeToString(b, DEFAULT)
+            editor.putString("albumImage$idx", encodedImage)
+        }
+        editor.apply()
+
+    }
+
+    fun loadImage(idx : Int): Bitmap{
+        preferences = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE)
+        val previouslyEncodedImage: String = preferences!!.getString("albumImage$idx", "")!!
+        val b: ByteArray = decode(previouslyEncodedImage, DEFAULT)
+        return BitmapFactory.decodeByteArray(b, 0, b.size)
     }
 
     fun storePlayingInfo(isPlaying: Boolean, seekTime: Int){

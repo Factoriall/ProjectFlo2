@@ -9,6 +9,4 @@ data class Music(val url : String,
                  val albumName : String,
                  val musicLyrics: List<MusicLyrics>,
                  val duration: Int,
-                 val fileUrl : String,
-                 @Transient val image: Bitmap
-) : Serializable
+                 val fileUrl : String) : Serializable

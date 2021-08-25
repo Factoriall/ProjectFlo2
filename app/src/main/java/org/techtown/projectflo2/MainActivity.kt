@@ -42,6 +42,7 @@ class MainActivity : AppCompatActivity() {
         var isPlaying = false
         var updateJob: Job? = null
         var seekTime : Int = 0
+        var isPrepared = false
     }
 
     var serviceBound = false
@@ -82,10 +83,14 @@ class MainActivity : AppCompatActivity() {
         else controlButton.setImageResource(R.drawable.ic_play)
         musicList = StorageUtil(applicationContext).loadAudio()
         image = StorageUtil(applicationContext).loadImage(0)
+        musicSeekBar.progress = seekTime / 1000
 
         if (isPlaying) startSeekbarThread()
         setMusicView(0)
+        setPlayerListener()
+    }
 
+    private fun setPlayerListener() {
         player!!.playPauseListener = { wasPlaying ->
             if (wasPlaying) onTrackPause()
             else onTrackPlay()
@@ -98,6 +103,10 @@ class MainActivity : AppCompatActivity() {
             onTrackPause()
             Log.d("lifecycle", "onCompleteListener")
         }
+        player!!.onPrepareListener = {
+            isPrepared = true
+            startSeekbarThread()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -108,6 +117,7 @@ class MainActivity : AppCompatActivity() {
 
         initView()
         if(savedInstanceState == null) loadMusic()
+
     }
 
     private fun initView(){
@@ -128,6 +138,10 @@ class MainActivity : AppCompatActivity() {
             controlAudio(0, false)
             if(!isPlaying) onTrackPlay()
             else onTrackPause()
+        }
+
+        lyricsLayout.setOnClickListener{
+
         }
     }
 
@@ -179,6 +193,7 @@ class MainActivity : AppCompatActivity() {
         singerName.text = musicList[idx].singerName
         albumName.text = musicList[idx].albumName
         songLength.text = getTimeFormatFromSecs(musicList[idx].duration)
+        songNow.text = getTimeFormatFromSecs(seekTime)
         musicSeekBar.max = musicList[idx].duration
         mainLyrics.text = musicList[idx].musicLyrics[0].lyrics
         nextLyrics.text = musicList[idx].musicLyrics[1].lyrics
@@ -264,17 +279,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateSeekbar(): Job {
-        Log.d("LifecycleCheck", "updateSeekbar")
-
         return CoroutineScope(Dispatchers.IO).launch {
-            val isPlayerNull = (player == null)
             while (true) {
-                if(isPlayerNull) seekTime += 500
-                else{
-                    val playerTime = player!!.getCurrentTime()
-                    if(playerTime - 1000 > seekTime || playerTime + 1000 < seekTime) seekTime += 500
-                    else seekTime = playerTime
-                }
+                val playerTime = player!!.getCurrentTime()
+                if(playerTime - 1000 > seekTime || playerTime + 1000 < seekTime) seekTime += 500
+                else seekTime = playerTime
+
                 Log.d("updateSeekbar", "time: $seekTime")
 
                 withContext(Main) {
@@ -299,18 +309,7 @@ class MainActivity : AppCompatActivity() {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
             val binder = service as MediaPlayerService.LocalBinder
             player = binder.getService()
-            player!!.playPauseListener = { wasPlaying ->
-                if(wasPlaying) onTrackPause()
-                else onTrackPlay()
-                Log.d("lifecycle", "playPauseListener")
-            }
-            player!!.onCompleteListener = {
-                musicSeekBar.progress = 0
-                seekTime = 0
-                isPlaying = false
-                onTrackPause()
-                Log.d("lifecycle", "onCompleteListener")
-            }
+            setPlayerListener()
             serviceBound = true
         }
 
@@ -321,6 +320,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun controlAudio(idx : Int, isSeeking : Boolean){
+
         if(!serviceBound){//서비스가 active하지 않다면
             Log.d("LifecycleCheck", "startService")
             val storage = StorageUtil(applicationContext)
@@ -333,9 +333,9 @@ class MainActivity : AppCompatActivity() {
                 createChannel()
             }
 
-            val playerIntent = Intent(this, MediaPlayerService::class.java)
+            val playerIntent = Intent(applicationContext, MediaPlayerService::class.java)
             startService(playerIntent)
-            applicationContext.bindService(playerIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+            bindService(playerIntent, serviceConnection, Context.BIND_AUTO_CREATE)
         }
         else{//BroadcastReceiver 통해
             Log.d("LifecycleCheck", "broadcastReceiver")
@@ -375,15 +375,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    fun onTrackPlay() {
-        Log.d("LifecycleCheck", "onTrackPlay")
+    private fun onTrackPlay() {
         isPlaying = true
-        Log.d("LifecycleCheck", "isPlaying: $isPlaying")
         controlButton.setImageResource(R.drawable.ic_pause)
-        startSeekbarThread()
+        if(isPrepared) startSeekbarThread()
     }
 
-    fun onTrackPause() {
+    private fun onTrackPause() {
         Log.d("LifecycleCheck", "onTrackPause")
         isPlaying = false
         controlButton.setImageResource(R.drawable.ic_play)
@@ -395,7 +393,7 @@ class MainActivity : AppCompatActivity() {
 
         super.onDestroy()
         if (isFinishing && serviceBound) {
-            applicationContext.unbindService(serviceConnection)
+            unbindService(serviceConnection)
             serviceBound = false
             player!!.stopSelf()
         }

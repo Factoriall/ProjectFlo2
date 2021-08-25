@@ -25,6 +25,8 @@ import java.io.IOException
 import android.R.attr.name
 import android.app.Notification
 import android.app.Notification.*
+import android.media.session.PlaybackState
+import android.support.v4.media.session.PlaybackStateCompat
 
 
 class MediaPlayerService : Service(),
@@ -37,6 +39,7 @@ class MediaPlayerService : Service(),
     AudioManager.OnAudioFocusChangeListener{
     var playPauseListener: ( (Boolean) -> Unit )? = null
     var onCompleteListener: ( () -> Unit )? = null
+    var onPrepareListener: ( () -> Unit )? = null
 
     companion object{
         const val ACTION_PLAY = "org.techtown.projectflo2.ACTION_PLAY"
@@ -62,11 +65,12 @@ class MediaPlayerService : Service(),
 
     private var musicList = arrayListOf<Music>()
     private var mIdx = -1
-    private var isPlaying = false
     private lateinit var activeMusic : Music
+    private var isStarted = false
 
     private val becomingNoisyReceiver = object : BroadcastReceiver(){
         override fun onReceive(p0: Context?, p1: Intent?) {
+            Log.d("lifecycleCheck", "becomingNoisyReceiver")
             pauseMedia()
             buildNotification(PlaybackStatus.PAUSE)
         }
@@ -74,6 +78,7 @@ class MediaPlayerService : Service(),
 
     private val startMusic = object: BroadcastReceiver(){
         override fun onReceive(p0: Context, p1: Intent) {
+            Log.d("lifecycleCheck", "startMusic method")
             playMedia()
             buildNotification(PlaybackStatus.PLAYING)
         }
@@ -81,7 +86,7 @@ class MediaPlayerService : Service(),
 
     private val resumeMusic = object: BroadcastReceiver(){
         override fun onReceive(p0: Context, p1: Intent) {
-            Log.d("MediaPlayerReceiver", "resumeMusic method")
+            Log.d("lifecycleCheck", "resumeMusic method")
             resumeMedia()
             buildNotification(PlaybackStatus.PLAYING)
         }
@@ -90,7 +95,7 @@ class MediaPlayerService : Service(),
     //서비스가 시행 중에 pause 신호가 오면 잠시 멈춤
     private val pauseMusic = object: BroadcastReceiver(){
         override fun onReceive(p0: Context, p1: Intent) {
-            Log.d("MediaPlayerReceiver", "pause method")
+            Log.d("lifecycleCheck", "pause method")
             pauseMedia()
             buildNotification(PlaybackStatus.PAUSE)
         }
@@ -98,6 +103,8 @@ class MediaPlayerService : Service(),
 
     private val seekToPlayMusic = object: BroadcastReceiver(){
         override fun onReceive(p0: Context, p1: Intent) {
+            Log.d("lifecycleCheck", "seekToPlayMusic Receiver")
+
             val storage = StorageUtil(applicationContext)
             resumePos = storage.loadSeekTime()
             resumeMedia()
@@ -159,8 +166,8 @@ class MediaPlayerService : Service(),
         if(!requestAudioFocus()) stopSelf()
         if(mediaSessionManager == null){
             try{
-                initMediaSession()
                 initMediaPlayer()
+                initMediaSession()
             }catch(e:RemoteException){
                 e.printStackTrace()
                 stopSelf()
@@ -261,18 +268,21 @@ class MediaPlayerService : Service(),
 
         mediaSession.setCallback(object: MediaSessionCompat.Callback(){
             override fun onPlay() {
+                Log.d("lifecycleCheck", "onPlay callback")
                 super.onPlay()
                 resumeMedia()
                 buildNotification(PlaybackStatus.PLAYING)
             }
 
             override fun onPause() {
+                Log.d("lifecycleCheck", "onPause callback")
                 super.onPause()
                 pauseMedia()
                 buildNotification(PlaybackStatus.PAUSE)
             }
 
             override fun onStop() {
+                Log.d("lifecycleCheck", "onStop callback")
                 super.onStop()
                 removeNotification()
                 stopSelf()
@@ -360,12 +370,26 @@ class MediaPlayerService : Service(),
     }
 
     private fun updateMetaData(){
+        //Log.d("updateMetadata", "" + mediaPlayer!!.duration.toLong());
         mediaSession.setMetadata(MediaMetadataCompat.Builder()
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, albumImage)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, activeMusic.singerName)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, activeMusic.albumName)
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, activeMusic.songName)
+            //.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, mediaPlayer!!.duration.toLong())
             .build())
+        /*
+        mediaSession.setPlaybackState(
+            PlaybackStateCompat
+                .Builder()
+                .setState(
+                    PlaybackStateCompat.STATE_PLAYING,
+                    mediaPlayer!!.currentPosition.toLong(),
+                    1.0f
+                )
+                .setActions(PlaybackStateCompat.ACTION_SEEK_TO)
+                .build()
+        )*/
     }
 
     private fun playMedia(){//미디어 플레이어 시작
@@ -400,14 +424,19 @@ class MediaPlayerService : Service(),
 
     override fun onCompletion(p0: MediaPlayer?) {
         //노래가 다 끝났을 때 발동
+        Log.d("lifecycleCheck", "onCompletion")
+
         stopMedia()
-        stopSelf()//서비스 종료
-        buildNotification(PlaybackStatus.PLAYING)
+        stopSelf()
+        mediaPlayer!!.seekTo(0)
+        buildNotification(PlaybackStatus.PAUSE)
         onCompleteListener?.invoke()
     }
 
     override fun onPrepared(p0: MediaPlayer?) {
+        //updateMetaData()
         //미디어 소스가 플레이할 준비를 마쳤을 때 발동
+        onPrepareListener?.invoke()
         playMedia()
     }
 

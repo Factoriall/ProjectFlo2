@@ -23,6 +23,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".LyricsActivity"
+            android:exported="true"
+            android:configChanges="orientation|keyboard">
+        </activity>
         <service android:name=".MediaPlayerService" />
         <receiver android:name="androidx.media.session.MediaButtonReceiver" >
             <intent-filter>

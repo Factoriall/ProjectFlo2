@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Build
 import androidx.appcompat.app.AppCompatActivity
@@ -17,6 +16,8 @@ import android.util.Log
 import android.widget.ImageView
 import android.widget.SeekBar
 import android.widget.TextView
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.constraintlayout.widget.ConstraintLayout
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
@@ -38,17 +39,17 @@ class MainActivity : AppCompatActivity() {
         const val Broadcast_SEEK_TO_PLAY = "org.techtown.projectflo2.SEEK_TO_PLAY"
         const val Broadcast_SEEK_TO_PAUSE = "org.techtown.projectflo2.SEEK_TO_PAUSE"
 
-        private var player : MediaPlayerService? = null
+        var player : MediaPlayerService? = null
+        var serviceBound = false
         var isPlaying = false
-        var updateJob: Job? = null
         var seekTime : Int = 0
         var isPrepared = false
+        var musicIdx : Int = 0
+
+        var musicList = arrayListOf<Music>()
+        var bitmapList = arrayListOf<Bitmap>()
     }
-
-    var serviceBound = false
-
-    private var musicList = arrayListOf<Music>()
-    private var bitmapList = arrayListOf<Bitmap>()
+    var updateJob: Job? = null
 
     private lateinit var songTitle: TextView
     private lateinit var albumImage: ImageView
@@ -62,6 +63,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var controlButton: ImageView
     private lateinit var lyricsLayout: ConstraintLayout
     private lateinit var notificationManager : NotificationManager
+    private lateinit var activityResultLauncher : ActivityResultLauncher<Intent>
 
     private lateinit var image : Bitmap
 
@@ -86,8 +88,7 @@ class MainActivity : AppCompatActivity() {
         musicSeekBar.progress = seekTime / 1000
 
         if (isPlaying) startSeekbarThread()
-        setMusicView(0)
-        setPlayerListener()
+        setMusicView()
     }
 
     private fun setPlayerListener() {
@@ -117,7 +118,6 @@ class MainActivity : AppCompatActivity() {
 
         initView()
         if(savedInstanceState == null) loadMusic()
-
     }
 
     private fun initView(){
@@ -134,14 +134,25 @@ class MainActivity : AppCompatActivity() {
         controlButton = findViewById(R.id.controlButton)
         lyricsLayout = findViewById(R.id.lyricsLayout)
 
+        activityResultLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()){
+
+        controlButton.setImageResource(
+            if (isPlaying) R.drawable.ic_pause
+            else R.drawable.ic_play)
+
+            musicSeekBar.progress = seekTime / 1000
+            if (isPlaying) startSeekbarThread()
+        }
+
         controlButton.setOnClickListener {
-            controlAudio(0, false)
+            controlAudio(false)
             if(!isPlaying) onTrackPlay()
             else onTrackPause()
         }
 
         lyricsLayout.setOnClickListener{
-
+            val intent = Intent(this, LyricsActivity::class.java)
+            activityResultLauncher.launch(intent)
         }
     }
 
@@ -181,22 +192,23 @@ class MainActivity : AppCompatActivity() {
             )
 
             withContext(Main){
-                setMusicView(0)
+                setMusicView()
             }
             //dialog.dismiss()
         }
     }
 
-    private fun setMusicView(idx : Int) {
+    private fun setMusicView() {
         Log.d("LifecycleCheck", "setMusicView")
-        songTitle.text = musicList[idx].songName
-        singerName.text = musicList[idx].singerName
-        albumName.text = musicList[idx].albumName
-        songLength.text = getTimeFormatFromSecs(musicList[idx].duration)
+        val music = musicList[musicIdx]
+        songTitle.text = music.songName
+        singerName.text = music.singerName
+        albumName.text = music.albumName
+        songLength.text = getTimeFormatFromSecs(music.duration)
         songNow.text = getTimeFormatFromSecs(seekTime)
-        musicSeekBar.max = musicList[idx].duration
-        mainLyrics.text = musicList[idx].musicLyrics[0].lyrics
-        nextLyrics.text = musicList[idx].musicLyrics[1].lyrics
+        musicSeekBar.max = music.duration
+        mainLyrics.text = music.musicLyrics[0].lyrics
+        nextLyrics.text = music.musicLyrics[1].lyrics
         albumImage.setImageBitmap(image)
 
         musicSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -210,8 +222,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onStopTrackingTouch(p0: SeekBar?) {
-                controlAudio(0, true)
-                setLyricsText(0)
+                controlAudio(true)
+                setLyricsText()
 
                 if (isPlaying) {
                     startSeekbarThread()
@@ -237,10 +249,10 @@ class MainActivity : AppCompatActivity() {
         return musicLyrics
     }
 
-    private fun setLyricsText(idx : Int) {
+    private fun setLyricsText() {
         Log.d("LifecycleCheck", "setLyricsText")
 
-        val musicLyrics = musicList[idx].musicLyrics
+        val musicLyrics = musicList[musicIdx].musicLyrics
         var isFirst = true
         for (mIdx in musicLyrics.indices.reversed()) {
             val now = musicLyrics[mIdx]
@@ -249,7 +261,7 @@ class MainActivity : AppCompatActivity() {
 
             isFirst = false
             CoroutineScope(Main).launch {
-                setLyricsTextView(now, mIdx, idx)
+                setLyricsTextView(now, mIdx)
             }
             break
         }
@@ -263,13 +275,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setLyricsTextView(now: MusicLyrics, mIdx: Int, idx: Int) {
+    private fun setLyricsTextView(now: MusicLyrics, mIdx: Int) {
         Log.d("LifecycleCheck", "setLyricsTextView")
 
         mainLyrics.setTextColor(Color.BLUE)
         mainLyrics.text = now.lyrics
         nextLyrics.text =
-            if (mIdx != musicList[idx].musicLyrics.size - 1) musicList[idx].musicLyrics[mIdx + 1].lyrics
+            if (mIdx != musicList[musicIdx].musicLyrics.size - 1) musicList[musicIdx].musicLyrics[mIdx + 1].lyrics
             else ""
     }
 
@@ -291,7 +303,7 @@ class MainActivity : AppCompatActivity() {
                     musicSeekBar.progress = seekTime / 1000
                 }
 
-                setLyricsText(0)
+                setLyricsText()
                 delay(500)
             }
         }
@@ -304,30 +316,15 @@ class MainActivity : AppCompatActivity() {
         return String.format("%02d:%02d", minutes, seconds)
     }
 
-    //바인딩 통해 액티비티와 interact 가능하게 설정
-    private val serviceConnection = object: ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, service: IBinder) {
-            val binder = service as MediaPlayerService.LocalBinder
-            player = binder.getService()
-            setPlayerListener()
-            serviceBound = true
-        }
-
-        override fun onServiceDisconnected(p0: ComponentName?) {
-            Log.d("onService","Service disconnected")
-            serviceBound = false
-        }
-    }
-
-    private fun controlAudio(idx : Int, isSeeking : Boolean){
+    private fun controlAudio(isSeeking : Boolean){
 
         if(!serviceBound){//서비스가 active하지 않다면
             Log.d("LifecycleCheck", "startService")
             val storage = StorageUtil(applicationContext)
             storage.storeAudio(musicList)
-            storage.storeAudioIndex(idx)
+            storage.storeAudioIndex(musicIdx)
             storage.storeImages(bitmapList)
-            storage.storePlayingInfo(isPlaying, seekTime)
+            storage.storePlayingInfo(seekTime)
 
             if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 createChannel()
@@ -341,8 +338,8 @@ class MainActivity : AppCompatActivity() {
             Log.d("LifecycleCheck", "broadcastReceiver")
 
             val storage = StorageUtil(applicationContext)
-            storage.storeAudioIndex(idx)
-            storage.storePlayingInfo(isPlaying, seekTime)
+            storage.storeAudioIndex(musicIdx)
+            storage.storePlayingInfo(seekTime)
 
             val broadcastIntent : Intent =
                 if(!isSeeking) {
@@ -358,6 +355,20 @@ class MainActivity : AppCompatActivity() {
                     else Intent(Broadcast_SEEK_TO_PAUSE)
                 }
             sendBroadcast(broadcastIntent)
+        }
+    }
+
+    private val serviceConnection = object: ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, service: IBinder) {
+            val binder = service as MediaPlayerService.LocalBinder
+            player = binder.getService()
+            setPlayerListener()
+            serviceBound = true
+        }
+
+        override fun onServiceDisconnected(p0: ComponentName?) {
+            Log.d("onService","Service disconnected")
+            serviceBound = false
         }
     }
 

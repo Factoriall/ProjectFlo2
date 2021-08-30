@@ -62,10 +62,9 @@ class StorageUtil(private val context: Context) {
         return BitmapFactory.decodeByteArray(b, 0, b.size)
     }
 
-    fun storePlayingInfo(isPlaying: Boolean, seekTime: Int){
+    fun storePlayingInfo(seekTime: Int){
         preferences = context.getSharedPreferences(STORAGE, Context.MODE_PRIVATE)
         val editor = preferences!!.edit()
-        editor.putBoolean("isPlaying", isPlaying)
         editor.putInt("seekTime", seekTime)
         editor.apply()
     }

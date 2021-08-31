@@ -10,7 +10,6 @@ import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
-import android.os.PersistableBundle
 import android.util.Log
 import android.view.ViewGroup
 import android.widget.ImageView
@@ -74,7 +73,7 @@ class LyricsActivity : AppCompatActivity(){
 
         musicSeekBar = findViewById(R.id.musicSeekBar)
         musicSeekBar.max = music.duration
-        musicSeekBar.progress = seekTime
+        musicSeekBar.progress = seekTime / 1000
         musicSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(p0: SeekBar?, value: Int, p2: Boolean) {
                 seekTime = value * 1000
@@ -191,16 +190,16 @@ class LyricsActivity : AppCompatActivity(){
         }
     }
 
-
+    /*
     private fun getTimeFormatFromSecs(duration: Int): CharSequence {
         val minutes: Int = duration / 60
         val seconds: Int = duration % 60
 
         return String.format("%02d:%02d", minutes, seconds)
-    }
+    }*/
 
     private fun controlAudio(isSeeking : Boolean){
-        if(!serviceBound){//서비스가 active하지 않다면
+        if(!serviceBound){//서비스가 active 하지 않다면
             Log.d("LifecycleCheck", "startService")
             val storage = StorageUtil(applicationContext)
             storage.storeAudio(musicList)
@@ -283,6 +282,10 @@ class LyricsActivity : AppCompatActivity(){
         player!!.onPrepareListener = {
             MainActivity.isPrepared = true
             startSeekbarThread()
+        }
+
+        player!!.onSeekCompleteListener = {
+            musicSeekBar.progress = player!!.getCurrentTime() / 1000
         }
     }
 

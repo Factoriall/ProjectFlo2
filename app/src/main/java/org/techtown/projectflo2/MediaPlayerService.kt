@@ -1,5 +1,7 @@
 package org.techtown.projectflo2
 
+import android.annotation.SuppressLint
+import android.app.Notification.*
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
@@ -17,16 +19,12 @@ import android.os.*
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaControllerCompat
 import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import android.telephony.PhoneStateListener
 import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.io.IOException
-import android.R.attr.name
-import android.app.Notification
-import android.app.Notification.*
-import android.media.session.PlaybackState
-import android.support.v4.media.session.PlaybackStateCompat
 
 
 class MediaPlayerService : Service(),
@@ -38,8 +36,10 @@ class MediaPlayerService : Service(),
     MediaPlayer.OnBufferingUpdateListener,
     AudioManager.OnAudioFocusChangeListener{
     var playPauseListener: ( (Boolean) -> Unit )? = null
+    var onSeekCompleteListener: ( () -> Unit )? = null
     var onCompleteListener: ( () -> Unit )? = null
     var onPrepareListener: ( () -> Unit )? = null
+    var wasPlayed = false
 
     companion object{
         const val ACTION_PLAY = "org.techtown.projectflo2.ACTION_PLAY"
@@ -66,7 +66,6 @@ class MediaPlayerService : Service(),
     private var musicList = arrayListOf<Music>()
     private var mIdx = -1
     private lateinit var activeMusic : Music
-    private var isStarted = false
 
     private val becomingNoisyReceiver = object : BroadcastReceiver(){
         override fun onReceive(p0: Context?, p1: Intent?) {
@@ -108,6 +107,7 @@ class MediaPlayerService : Service(),
             val storage = StorageUtil(applicationContext)
             resumePos = storage.loadSeekTime()
             resumeMedia()
+
             buildNotification(PlaybackStatus.PLAYING)
         }
     }
@@ -116,6 +116,8 @@ class MediaPlayerService : Service(),
         override fun onReceive(p0: Context, p1: Intent) {
             val storage = StorageUtil(applicationContext)
             resumePos = storage.loadSeekTime()
+
+            buildNotification(PlaybackStatus.PAUSE)
         }
     }
 
@@ -157,6 +159,7 @@ class MediaPlayerService : Service(),
             musicList = storage.loadAudio()
             mIdx = storage.loadAudioIndex()
             albumImage = storage.loadImage(mIdx)
+            resumePos = storage.loadSeekTime()
 
             if(mIdx != -1 && mIdx < musicList.size)
                 activeMusic = musicList[mIdx]
@@ -173,7 +176,7 @@ class MediaPlayerService : Service(),
                 stopSelf()
             }
 
-            buildNotification(PlaybackStatus.PLAYING)
+
         }
         handleIncomingAction(intent)
 
@@ -290,6 +293,8 @@ class MediaPlayerService : Service(),
 
             override fun onSeekTo(pos: Long) {
                 super.onSeekTo(pos)
+                resumePos = pos.toInt()
+                mediaPlayer!!.seekTo(resumePos)
             }
         })
     }
@@ -322,8 +327,10 @@ class MediaPlayerService : Service(),
                 .setShowActionsInCompactView(0)
                 .setMediaSession(mediaSession.sessionToken))
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setAutoCancel(false)
+            .setOngoing(true)
             .build()
-        notification.flags = FLAG_NO_CLEAR
+        notification.flags = FLAG_ONGOING_EVENT
 
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
@@ -332,6 +339,7 @@ class MediaPlayerService : Service(),
         notificationManager.cancel(NOTIFICATION_ID)
     }
 
+    @SuppressLint("UnspecifiedImmutableFlag")
     private fun playbackAction(actionNumber: Int): PendingIntent? {
         val playbackAction = Intent(this, MediaPlayerService::class.java)
         when (actionNumber) {
@@ -376,9 +384,9 @@ class MediaPlayerService : Service(),
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, activeMusic.singerName)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, activeMusic.albumName)
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, activeMusic.songName)
-            //.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, mediaPlayer!!.duration.toLong())
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, activeMusic.duration * 1000L)
             .build())
-        /*
+
         mediaSession.setPlaybackState(
             PlaybackStateCompat
                 .Builder()
@@ -389,11 +397,13 @@ class MediaPlayerService : Service(),
                 )
                 .setActions(PlaybackStateCompat.ACTION_SEEK_TO)
                 .build()
-        )*/
+        )
     }
 
     private fun playMedia(){//미디어 플레이어 시작
+
         if(!mediaPlayer!!.isPlaying){
+            mediaPlayer!!.seekTo(resumePos)
             mediaPlayer!!.start()
         }
     }
@@ -408,6 +418,17 @@ class MediaPlayerService : Service(),
     }
 
     private fun pauseMedia(){//일시정지 및 resumePos에 정보 저장장
+        mediaSession.setPlaybackState(
+            PlaybackStateCompat
+                .Builder()
+                .setState(
+                    PlaybackStateCompat.STATE_PAUSED,
+                    mediaPlayer!!.currentPosition.toLong(),
+                    1.0f
+                )
+                .setActions(PlaybackStateCompat.ACTION_SEEK_TO)
+                .build()
+        )
         if(mediaPlayer!!.isPlaying){
             mediaPlayer!!.pause()
             resumePos = mediaPlayer!!.currentPosition
@@ -417,6 +438,17 @@ class MediaPlayerService : Service(),
     private fun resumeMedia(){
         Log.d("resumeMedia", mediaPlayer.toString())
         mediaPlayer!!.seekTo(resumePos)
+        mediaSession.setPlaybackState(
+            PlaybackStateCompat
+                .Builder()
+                .setState(
+                    PlaybackStateCompat.STATE_PLAYING,
+                    mediaPlayer!!.currentPosition.toLong(),
+                    1.0f
+                )
+                .setActions(PlaybackStateCompat.ACTION_SEEK_TO)
+                .build()
+        )
         if(!mediaPlayer!!.isPlaying){
             mediaPlayer!!.start()
         }
@@ -436,6 +468,7 @@ class MediaPlayerService : Service(),
     override fun onPrepared(p0: MediaPlayer?) {
         //updateMetaData()
         //미디어 소스가 플레이할 준비를 마쳤을 때 발동
+        buildNotification(PlaybackStatus.PLAYING)
         onPrepareListener?.invoke()
         playMedia()
     }
@@ -455,6 +488,7 @@ class MediaPlayerService : Service(),
     }
 
     override fun onSeekComplete(p0: MediaPlayer?) {
+        onSeekCompleteListener?.invoke()
         //seekbar의 활동이 끝날 시 발동
     }
 
@@ -475,15 +509,22 @@ class MediaPlayerService : Service(),
             -> {
                 Log.d("onAudioFocusChange", "state: gain")
                 if(mediaPlayer == null) initMediaPlayer()
-                else if(!mediaPlayer!!.isPlaying) mediaPlayer!!.start()
+                else if(!mediaPlayer!!.isPlaying && wasPlayed){
+                    playPauseListener?.invoke(false)
+                    mediaPlayer!!.start()
+                    wasPlayed = false
+                }
                 mediaPlayer!!.setVolume(1f, 1f)
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT, AudioManager.AUDIOFOCUS_LOSS // 포커스가 짧은 시간 놓인 상태, 노래 멈춰야 됨
             -> {
                 Log.d("onAudioFocusChange", "state: loss")
 
-                if(mediaPlayer!!.isPlaying) mediaPlayer!!.pause()
-                playPauseListener?.invoke(true)
+                if(mediaPlayer!!.isPlaying){
+                    mediaPlayer!!.pause()
+                    wasPlayed = false
+                    playPauseListener?.invoke(true)
+                }
             }
 
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK // 포커스가 짧은 시간 놓인 상태, 노래 안 멈춰도 됨

@@ -1,5 +1,6 @@
 package org.techtown.projectflo2
 
+import android.app.AlertDialog
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.ComponentName
@@ -108,6 +109,10 @@ class MainActivity : AppCompatActivity() {
             isPrepared = true
             startSeekbarThread()
         }
+
+        player!!.onSeekCompleteListener = {
+            musicSeekBar.progress = player!!.getCurrentTime() / 1000
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -165,6 +170,11 @@ class MainActivity : AppCompatActivity() {
             null
         }
 
+        val builder: AlertDialog.Builder = AlertDialog.Builder(this)
+        builder.setCancelable(false)
+        builder.setView(R.layout.dialog_loading)
+        val dialog: AlertDialog = builder.create()
+        dialog.show()
 
         CoroutineScope(Dispatchers.IO).launch {
             val jsonResponse = url?.readText()
@@ -193,8 +203,9 @@ class MainActivity : AppCompatActivity() {
 
             withContext(Main){
                 setMusicView()
+                dialog.dismiss()
             }
-            //dialog.dismiss()
+
         }
     }
 
@@ -317,7 +328,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun controlAudio(isSeeking : Boolean){
-
         if(!serviceBound){//서비스가 active하지 않다면
             Log.d("LifecycleCheck", "startService")
             val storage = StorageUtil(applicationContext)
@@ -350,7 +360,6 @@ class MainActivity : AppCompatActivity() {
                     else Intent(Broadcast_PAUSE)
                 }
                 else{
-                    Log.d("broadcastIntent", "touch seekbar")
                     if (isPlaying) Intent(Broadcast_SEEK_TO_PLAY)
                     else Intent(Broadcast_SEEK_TO_PAUSE)
                 }

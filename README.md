@@ -10,19 +10,20 @@
 
 ### MainActivity
 
-![MainActivity](./image/MainActivity.jpg)
+<img src="./image/MainActivity.jpg" alt="MainActivity" width="200"/>
 
 - Play 버튼을 누를 시 Service 및 Notification 활성화
 - 노래가 나올 때마다 위치에 맞게 가사 업데이트
 - 노래가 play 중이면 Coroutine 이용해서 seekbar 업데이트 Thread 활성화
 
-![MainActivityLand](./image/MainActivity_land.jpg)
+<img src="./image/MainActivity_land.jpg" alt="MainActivityLand" width="500"/>
+
 
 - 가로모드 구현
 
 ### LyricsActivity
 
-![LyricsActivity](./image/LyricsActivity.jpg)
+<img src="./image/LyricsActivity.jpg" alt="LyricsActivityLand" width="200"/>
 
 - 전체 가사 확인 가능
 - 노래 나오는 부분을 파란색으로 표시
@@ -34,7 +35,7 @@
 
 ### MediaPlayerService
 
-![MediaPlayerService](./image/MediaPlayerNotification.jpg)
+<img src="./image/MediaPlayerNotification.jpg" alt="MediaPlayerNotification" width="500"/>
 
 - Service 부분 담당
 - Notification을 플레이 상황에 맞게 띄워줌

@@ -133,7 +133,7 @@ class LyricsActivity : AppCompatActivity(), PlayerControl{
                 if(isToggled){
                     val move = (music.musicLyrics[idx].startTime).toInt()
                     musicSeekBar.progress = move / 1000 + 1
-                    controlAudio(true)
+                    if(serviceBound) controlAudio(true)
                     setLyricsTextView(idx)
                 }
                 else{

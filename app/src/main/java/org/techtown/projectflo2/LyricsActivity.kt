@@ -26,7 +26,7 @@ import org.techtown.projectflo2.MainActivity.Companion.player
 import org.techtown.projectflo2.MainActivity.Companion.seekTime
 import org.techtown.projectflo2.MainActivity.Companion.serviceBound
 
-class LyricsActivity : AppCompatActivity(){
+class LyricsActivity : AppCompatActivity(), PlayerControl{
     private lateinit var music : Music
     private var isToggled : Boolean = false
     var updateJob : Job? = null
@@ -146,28 +146,6 @@ class LyricsActivity : AppCompatActivity(){
         musicSeekBar.max = music.duration
     }
 
-    private fun startSeekbarThread() {
-        updateJob?.cancel()
-        updateJob = updateSeekbar()
-    }
-
-    private fun updateSeekbar(): Job {
-        return CoroutineScope(Dispatchers.IO).launch {
-            while (true) {
-                val playerTime = player!!.getCurrentTime()
-                if(playerTime - 1000 > seekTime || playerTime + 1000 < seekTime) seekTime += 500
-                else seekTime = playerTime
-
-                withContext(Dispatchers.Main) {
-                    musicSeekBar.progress = seekTime / 1000
-                }
-
-                setLyricsText()
-                delay(500)
-            }
-        }
-    }
-
     private fun setLyricsText() {
         for(mIdx in music.musicLyrics.indices.reversed()){
             val now = music.musicLyrics[mIdx]
@@ -190,13 +168,43 @@ class LyricsActivity : AppCompatActivity(){
         }
     }
 
-    /*
-    private fun getTimeFormatFromSecs(duration: Int): CharSequence {
-        val minutes: Int = duration / 60
-        val seconds: Int = duration % 60
+    //Coroutine 관련 작업
+    private fun startSeekbarThread() {
+        updateJob?.cancel()
+        updateJob = updateSeekbar()
+    }
 
-        return String.format("%02d:%02d", minutes, seconds)
-    }*/
+    private fun updateSeekbar(): Job {
+        return CoroutineScope(Dispatchers.IO).launch {
+            while (true) {
+                val playerTime = player!!.getCurrentTime()
+                if(playerTime - 1000 > seekTime || playerTime + 1000 < seekTime) seekTime += 500
+                else seekTime = playerTime
+
+                withContext(Dispatchers.Main) {
+                    musicSeekBar.progress = seekTime / 1000
+                }
+
+                setLyricsText()
+                delay(500)
+            }
+        }
+    }
+
+    //Service 관련 작업들
+    private val serviceConnection = object: ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, service: IBinder) {
+            val binder = service as MediaPlayerService.LocalBinder
+            player = binder.getService()
+            setPlayerListener()
+            serviceBound = true
+        }
+
+        override fun onServiceDisconnected(p0: ComponentName?) {
+            Log.d("onService","Service disconnected")
+            serviceBound = false
+        }
+    }
 
     private fun controlAudio(isSeeking : Boolean){
         if(!serviceBound){//서비스가 active 하지 않다면
@@ -253,20 +261,6 @@ class LyricsActivity : AppCompatActivity(){
         }
     }
 
-    private val serviceConnection = object: ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, service: IBinder) {
-            val binder = service as MediaPlayerService.LocalBinder
-            player = binder.getService()
-            setPlayerListener()
-            serviceBound = true
-        }
-
-        override fun onServiceDisconnected(p0: ComponentName?) {
-            Log.d("onService","Service disconnected")
-            serviceBound = false
-        }
-    }
-
     private fun setPlayerListener() {
         player!!.playPauseListener = { wasPlaying ->
             Log.d("playPauseListener", "true")
@@ -289,13 +283,14 @@ class LyricsActivity : AppCompatActivity(){
         }
     }
 
-    private fun onTrackPlay() {
+    //PlayerControl interface
+    override fun onTrackPlay() {
         isPlaying = true
         controlButton.setImageResource(R.drawable.ic_pause)
         if(MainActivity.isPrepared) startSeekbarThread()
     }
 
-    private fun onTrackPause() {
+    override fun onTrackPause() {
         isPlaying = false
         controlButton.setImageResource(R.drawable.ic_play)
         updateJob?.cancel()

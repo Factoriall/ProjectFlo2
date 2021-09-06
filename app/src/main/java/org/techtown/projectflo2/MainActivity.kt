@@ -30,7 +30,7 @@ import org.techtown.projectflo2.MediaPlayerService.Companion.CHANNEL_ID
 import java.net.MalformedURLException
 import java.net.URL
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(),PlayerControl {
     private val urlName =
         "https://grepp-programmers-challenges.s3.ap-northeast-2.amazonaws.com/2020-flo/song.json"
     companion object {
@@ -77,7 +77,6 @@ class MainActivity : AppCompatActivity() {
         updateJob?.cancel()
     }
 
-
     override fun onRestoreInstanceState(savedInstanceState: Bundle) {
         Log.d("LifecycleCheck", "onRestoreInstanceState")
 
@@ -92,29 +91,6 @@ class MainActivity : AppCompatActivity() {
         setMusicView()
     }
 
-    private fun setPlayerListener() {
-        player!!.playPauseListener = { wasPlaying ->
-            if (wasPlaying) onTrackPause()
-            else onTrackPlay()
-            Log.d("lifecycle", "playPauseListener")
-        }
-        player!!.onCompleteListener = {
-            musicSeekBar.progress = 0
-            seekTime = 0
-            isPlaying = false
-            onTrackPause()
-            Log.d("lifecycle", "onCompleteListener")
-        }
-        player!!.onPrepareListener = {
-            isPrepared = true
-            startSeekbarThread()
-        }
-
-        player!!.onSeekCompleteListener = {
-            musicSeekBar.progress = player!!.getCurrentTime() / 1000
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         Log.d("LifecycleCheck", "onCreate")
 
@@ -125,6 +101,7 @@ class MainActivity : AppCompatActivity() {
         if(savedInstanceState == null) loadMusic()
     }
 
+    //UI 관련 작업
     private fun initView(){
         Log.d("LifecycleCheck", "initView")
         songTitle = findViewById(R.id.songTitle)
@@ -158,54 +135,6 @@ class MainActivity : AppCompatActivity() {
         lyricsLayout.setOnClickListener{
             val intent = Intent(this, LyricsActivity::class.java)
             activityResultLauncher.launch(intent)
-        }
-    }
-
-    private fun loadMusic(){
-        Log.d("LifecycleCheck", "loadMusic")
-        val url: URL? = try {
-            URL(urlName)
-        } catch (e: MalformedURLException) {
-            Log.d("Exception", e.toString())
-            null
-        }
-
-        val builder: AlertDialog.Builder = AlertDialog.Builder(this)
-        builder.setCancelable(false)
-        builder.setView(R.layout.dialog_loading)
-        val dialog: AlertDialog = builder.create()
-        dialog.show()
-
-        CoroutineScope(Dispatchers.IO).launch {
-            val jsonResponse = url?.readText()
-            val jsonObject = JSONTokener(jsonResponse).nextValue() as JSONObject
-
-            image = Glide
-                .with(baseContext)
-                .asBitmap()
-                .load(jsonObject.getString("image"))
-                .apply(RequestOptions().override(200, 200))
-                .skipMemoryCache(true)
-                .submit()
-                .get()
-            bitmapList.add(image)
-
-            musicList.add(
-                Music(
-                urlName,
-                jsonObject.getString("title"),
-                jsonObject.getString("singer"),
-                jsonObject.getString("album"),
-                getLyricsArray(jsonObject.getString("lyrics")),
-                jsonObject.getInt("duration"),
-                jsonObject.getString("file"))
-            )
-
-            withContext(Main){
-                setMusicView()
-                dialog.dismiss()
-            }
-
         }
     }
 
@@ -243,6 +172,91 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    private fun setLyricsText() {
+        val musicLyrics = musicList[musicIdx].musicLyrics
+        var isFirst = true
+        for (mIdx in musicLyrics.indices.reversed()) {
+            val now = musicLyrics[mIdx]
+            if (now.startTime >= seekTime) continue
+            Log.d("setLyricsText", "" + now.startTime + " " + seekTime)
+
+            isFirst = false
+            CoroutineScope(Main).launch {
+                mainLyrics.setTextColor(Color.BLUE)
+                mainLyrics.text = now.lyrics
+                nextLyrics.text =
+                    if (mIdx != musicList[musicIdx].musicLyrics.size - 1) musicList[musicIdx].musicLyrics[mIdx + 1].lyrics
+                    else ""
+            }
+            break
+        }
+
+        if(isFirst){
+            CoroutineScope(Main).launch {
+                mainLyrics.setTextColor(Color.GRAY)
+                mainLyrics.text = musicLyrics[0].lyrics
+                nextLyrics.text = musicLyrics[1].lyrics
+            }
+        }
+    }
+
+    private fun getTimeFormatFromSecs(duration: Int): CharSequence {
+        val minutes: Int = duration / 60
+        val seconds: Int = duration % 60
+
+        return String.format("%02d:%02d", minutes, seconds)
+    }
+
+
+    //음악 로딩 관련 작업
+    private fun loadMusic(){
+        Log.d("LifecycleCheck", "loadMusic")
+        val url: URL? = try {
+            URL(urlName)
+        } catch (e: MalformedURLException) {
+            Log.d("Exception", e.toString())
+            null
+        }
+
+        val builder: AlertDialog.Builder = AlertDialog.Builder(this)
+        builder.setCancelable(false)
+        builder.setView(R.layout.dialog_loading)
+        val dialog: AlertDialog = builder.create()
+        dialog.show()
+
+        CoroutineScope(Dispatchers.IO).launch {
+            val jsonResponse = url?.readText()
+            val jsonObject = JSONTokener(jsonResponse).nextValue() as JSONObject
+
+            image = Glide
+                .with(baseContext)
+                .asBitmap()
+                .load(jsonObject.getString("image"))
+                .apply(RequestOptions().override(200, 200))
+                .skipMemoryCache(true)
+                .submit()
+                .get()
+            bitmapList.add(image)
+
+            musicList.add(
+                Music(
+                    urlName,
+                    jsonObject.getString("title"),
+                    jsonObject.getString("singer"),
+                    jsonObject.getString("album"),
+                    getLyricsArray(jsonObject.getString("lyrics")),
+                    jsonObject.getInt("duration"),
+                    jsonObject.getString("file"))
+            )
+
+            withContext(Main){
+                setMusicView()
+                dialog.dismiss()
+            }
+
+        }
+    }
+
     private fun getLyricsArray(lyrics: String): List<MusicLyrics> {
         Log.d("LifecycleCheck", "getLyricsArray")
         val musicLyrics = mutableListOf<MusicLyrics>()
@@ -260,42 +274,7 @@ class MainActivity : AppCompatActivity() {
         return musicLyrics
     }
 
-    private fun setLyricsText() {
-        Log.d("LifecycleCheck", "setLyricsText")
-
-        val musicLyrics = musicList[musicIdx].musicLyrics
-        var isFirst = true
-        for (mIdx in musicLyrics.indices.reversed()) {
-            val now = musicLyrics[mIdx]
-            if (now.startTime >= seekTime) continue
-            Log.d("setLyricsText", "" + now.startTime + " " + seekTime)
-
-            isFirst = false
-            CoroutineScope(Main).launch {
-                setLyricsTextView(now, mIdx)
-            }
-            break
-        }
-
-        if(isFirst){
-            CoroutineScope(Main).launch {
-                mainLyrics.setTextColor(Color.GRAY)
-                mainLyrics.text = musicLyrics[0].lyrics
-                nextLyrics.text = musicLyrics[1].lyrics
-            }
-        }
-    }
-
-    private fun setLyricsTextView(now: MusicLyrics, mIdx: Int) {
-        Log.d("LifecycleCheck", "setLyricsTextView")
-
-        mainLyrics.setTextColor(Color.BLUE)
-        mainLyrics.text = now.lyrics
-        nextLyrics.text =
-            if (mIdx != musicList[musicIdx].musicLyrics.size - 1) musicList[musicIdx].musicLyrics[mIdx + 1].lyrics
-            else ""
-    }
-
+    //coroutine 관련 작업들
     private fun startSeekbarThread() {
         updateJob?.cancel()
         updateJob = updateSeekbar()
@@ -308,8 +287,6 @@ class MainActivity : AppCompatActivity() {
                 if(playerTime - 1000 > seekTime || playerTime + 1000 < seekTime) seekTime += 500
                 else seekTime = playerTime
 
-                Log.d("updateSeekbar", "time: $seekTime")
-
                 withContext(Main) {
                     musicSeekBar.progress = seekTime / 1000
                 }
@@ -320,16 +297,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun getTimeFormatFromSecs(duration: Int): CharSequence {
-        val minutes: Int = duration / 60
-        val seconds: Int = duration % 60
-
-        return String.format("%02d:%02d", minutes, seconds)
-    }
-
     private fun controlAudio(isSeeking : Boolean){
-        if(!serviceBound){//서비스가 active하지 않다면
-            Log.d("LifecycleCheck", "startService")
+        if(!serviceBound){//서비스가 active 하지 않다면
             val storage = StorageUtil(applicationContext)
             storage.storeAudio(musicList)
             storage.storeAudioIndex(musicIdx)
@@ -342,7 +311,9 @@ class MainActivity : AppCompatActivity() {
 
             val playerIntent = Intent(applicationContext, MediaPlayerService::class.java)
             startService(playerIntent)
-            bindService(playerIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+            bindService(playerIntent,
+                serviceConnection,
+                Context.BIND_AUTO_CREATE)
         }
         else{//BroadcastReceiver 통해
             Log.d("LifecycleCheck", "broadcastReceiver")
@@ -367,6 +338,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    //service 관련 작업
     private val serviceConnection = object: ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
             val binder = service as MediaPlayerService.LocalBinder
@@ -381,6 +353,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun setPlayerListener() {
+        player!!.playPauseListener = { wasPlaying ->
+            if (wasPlaying) onTrackPause()
+            else onTrackPlay()
+            Log.d("lifecycle", "playPauseListener")
+        }
+        player!!.onCompleteListener = {
+            musicSeekBar.progress = 0
+            seekTime = 0
+            isPlaying = false
+            onTrackPause()
+            Log.d("lifecycle", "onCompleteListener")
+        }
+        player!!.onPrepareListener = {
+            isPrepared = true
+            startSeekbarThread()
+        }
+
+        player!!.onSeekCompleteListener = {
+            musicSeekBar.progress = player!!.getCurrentTime() / 1000
+        }
+    }
+
     private fun createChannel() {
         if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val name = "Music Player"
@@ -389,19 +384,19 @@ class MainActivity : AppCompatActivity() {
             val mChannel = NotificationChannel(CHANNEL_ID, name, importance).apply {
                 description = descriptionText
             }
-            // Register the channel with the system
             notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(mChannel)
         }
     }
 
-    private fun onTrackPlay() {
+    //끝 작업
+    override fun onTrackPlay() {
         isPlaying = true
         controlButton.setImageResource(R.drawable.ic_pause)
         if(isPrepared) startSeekbarThread()
     }
 
-    private fun onTrackPause() {
+    override fun onTrackPause() {
         Log.d("LifecycleCheck", "onTrackPause")
         isPlaying = false
         controlButton.setImageResource(R.drawable.ic_play)
@@ -409,8 +404,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        Log.d("LifecycleCheck", "onDestroy")
-
         super.onDestroy()
         if (isFinishing && serviceBound) {
             unbindService(serviceConnection)

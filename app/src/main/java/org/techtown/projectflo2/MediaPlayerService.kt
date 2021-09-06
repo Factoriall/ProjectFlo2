@@ -67,93 +67,8 @@ class MediaPlayerService : Service(),
     private var mIdx = -1
     private lateinit var activeMusic : Music
 
-    private val becomingNoisyReceiver = object : BroadcastReceiver(){
-        override fun onReceive(p0: Context?, p1: Intent?) {
-            Log.d("lifecycleCheck", "becomingNoisyReceiver")
-            pauseMedia()
-            buildNotification(PlaybackStatus.PAUSE)
-        }
-    }
-
-    private val startMusic = object: BroadcastReceiver(){
-        override fun onReceive(p0: Context, p1: Intent) {
-            Log.d("lifecycleCheck", "startMusic method")
-            playMedia()
-            buildNotification(PlaybackStatus.PLAYING)
-        }
-    }
-
-    private val resumeMusic = object: BroadcastReceiver(){
-        override fun onReceive(p0: Context, p1: Intent) {
-            Log.d("lifecycleCheck", "resumeMusic method")
-            resumeMedia()
-            buildNotification(PlaybackStatus.PLAYING)
-        }
-    }
-
-    //서비스가 시행 중에 pause 신호가 오면 잠시 멈춤
-    private val pauseMusic = object: BroadcastReceiver(){
-        override fun onReceive(p0: Context, p1: Intent) {
-            Log.d("lifecycleCheck", "pause method")
-            pauseMedia()
-            buildNotification(PlaybackStatus.PAUSE)
-        }
-    }
-
-    private val seekToPlayMusic = object: BroadcastReceiver(){
-        override fun onReceive(p0: Context, p1: Intent) {
-            Log.d("lifecycleCheck", "seekToPlayMusic Receiver")
-
-            val storage = StorageUtil(applicationContext)
-            resumePos = storage.loadSeekTime()
-            resumeMedia()
-
-            buildNotification(PlaybackStatus.PLAYING)
-        }
-    }
-
-    private val seekToPauseMusic = object: BroadcastReceiver(){
-        override fun onReceive(p0: Context, p1: Intent) {
-            val storage = StorageUtil(applicationContext)
-            resumePos = storage.loadSeekTime()
-
-            buildNotification(PlaybackStatus.PAUSE)
-        }
-    }
-
-    //등록
-    private fun registerStartAudio(){
-        val filter = IntentFilter(MainActivity.Broadcast_PLAY)
-        registerReceiver(startMusic, filter)
-    }
-    private fun registerResumeAudio(){
-        val filter = IntentFilter(MainActivity.Broadcast_RESUME)
-        registerReceiver(resumeMusic, filter)
-    }
-
-    private fun registerPauseAudio(){
-        val filter = IntentFilter(MainActivity.Broadcast_PAUSE)
-        registerReceiver(pauseMusic, filter)
-    }
-
-    private fun registerSeekToPlayAudio(){
-        val filter = IntentFilter(MainActivity.Broadcast_SEEK_TO_PLAY)
-        registerReceiver(seekToPlayMusic, filter)
-    }
-
-    private fun registerSeekToPauseAudio(){
-        val filter = IntentFilter(MainActivity.Broadcast_SEEK_TO_PAUSE)
-        registerReceiver(seekToPauseMusic, filter)
-    }
-
-    override fun onBind(p0: Intent): IBinder {
-        return iBinder
-    }
-
     //Service Lifecycle에서 activity가 서비스 시작을 요청할 시 call하는 메서드
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
-        Log.d("LifecycleCheck", "service onStartCommand")
-
         try{
             val storage = StorageUtil(applicationContext)
             musicList = storage.loadAudio()
@@ -175,14 +90,11 @@ class MediaPlayerService : Service(),
                 e.printStackTrace()
                 stopSelf()
             }
-
-
         }
         handleIncomingAction(intent)
 
         return super.onStartCommand(intent, flags, startId)
     }
-
 
     override fun onCreate() {
         Log.d("LifecycleCheck", "service onCreate")
@@ -192,42 +104,7 @@ class MediaPlayerService : Service(),
         //broadcastReceiver 등록
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         callStateListener()//전화 관련 listener 등록
-        registerBecomingNoisyReceiver()//receiver 등록
-        registerStartAudio()
-        registerResumeAudio()
-        registerPauseAudio()
-        registerSeekToPauseAudio()
-        registerSeekToPlayAudio()
-    }
-
-    //service 종료 시 호출, mediaPlayer release 필요
-    override fun onDestroy() {
-        Log.d("LifecycleCheck", "service onDestroy")
-
-        super.onDestroy()
-        if(mediaPlayer != null){
-            stopMedia()
-            mediaPlayer!!.release()
-        }
-        removeAudioFocus()
-
-        //receiver 및 listener 해제
-        if(phoneStateListener != null){
-            telephonyManager.listen(phoneStateListener,
-            PhoneStateListener.LISTEN_NONE)
-        }
-
-        removeNotification()
-
-        unregisterReceiver(becomingNoisyReceiver)
-        unregisterReceiver(startMusic)
-        unregisterReceiver(resumeMusic)
-        unregisterReceiver(pauseMusic)
-        unregisterReceiver(seekToPauseMusic)
-        unregisterReceiver(seekToPlayMusic)
-
-        //캐시 데이터 삭제
-        StorageUtil(applicationContext).clearCachedAudioPlaylist()
+        registerReceivers()
     }
 
     private fun initMediaPlayer(){
@@ -401,15 +278,10 @@ class MediaPlayerService : Service(),
     }
 
     private fun playMedia(){//미디어 플레이어 시작
-
         if(!mediaPlayer!!.isPlaying){
             mediaPlayer!!.seekTo(resumePos)
             mediaPlayer!!.start()
         }
-    }
-
-    fun getCurrentTime() : Int{
-        return mediaPlayer!!.currentPosition
     }
 
     private fun stopMedia(){//정지
@@ -454,6 +326,11 @@ class MediaPlayerService : Service(),
         }
     }
 
+    fun getCurrentTime() : Int{
+        return mediaPlayer!!.currentPosition
+    }
+
+    //특정 작업 관련 listener
     override fun onCompletion(p0: MediaPlayer?) {
         //노래가 다 끝났을 때 발동
         Log.d("lifecycleCheck", "onCompletion")
@@ -536,6 +413,7 @@ class MediaPlayerService : Service(),
         }
     }
 
+    //Audio Focus 관련 작업
     private fun requestAudioFocus() : Boolean{
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val result : Int
@@ -584,11 +462,6 @@ class MediaPlayerService : Service(),
         }
     }
 
-    private fun registerBecomingNoisyReceiver(){
-        val intentFilter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
-        registerReceiver(becomingNoisyReceiver, intentFilter)
-    }
-
     private fun callStateListener(){
         telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
         //폰 상태 변화를 이제 listener 통해 듣기 가능
@@ -620,11 +493,126 @@ class MediaPlayerService : Service(),
             PhoneStateListener.LISTEN_CALL_STATE)
     }
 
+    //Receiver 관련
+    private fun registerReceivers() {
+        registerBecomingNoisyReceiver()//receiver 등록
+        registerStartAudio()
+        registerResumeAudio()
+        registerPauseAudio()
+        registerSeekToPauseAudio()
+        registerSeekToPlayAudio()
+    }
+
+    private fun unregisterReceivers() {
+        unregisterReceiver(becomingNoisyReceiver)
+        unregisterReceiver(startMusic)
+        unregisterReceiver(resumeMusic)
+        unregisterReceiver(pauseMusic)
+        unregisterReceiver(seekToPauseMusic)
+        unregisterReceiver(seekToPlayMusic)
+    }
+
+    private val becomingNoisyReceiver = object : BroadcastReceiver(){
+        override fun onReceive(p0: Context?, p1: Intent?) {
+            Log.d("lifecycleCheck", "becomingNoisyReceiver")
+            pauseMedia()
+            buildNotification(PlaybackStatus.PAUSE)
+        }
+    }
+    private val startMusic = object: BroadcastReceiver(){
+        override fun onReceive(p0: Context, p1: Intent) {
+            Log.d("lifecycleCheck", "startMusic method")
+            playMedia()
+            buildNotification(PlaybackStatus.PLAYING)
+        }
+    }
+    private val resumeMusic = object: BroadcastReceiver(){
+        override fun onReceive(p0: Context, p1: Intent) {
+            Log.d("lifecycleCheck", "resumeMusic method")
+            resumeMedia()
+            buildNotification(PlaybackStatus.PLAYING)
+        }
+    }
+    private val pauseMusic = object: BroadcastReceiver(){
+        override fun onReceive(p0: Context, p1: Intent) {
+            pauseMedia()
+            buildNotification(PlaybackStatus.PAUSE)
+        }
+    }
+    private val seekToPlayMusic = object: BroadcastReceiver(){
+        override fun onReceive(p0: Context, p1: Intent) {
+            val storage = StorageUtil(applicationContext)
+            resumePos = storage.loadSeekTime()
+            resumeMedia()
+
+            buildNotification(PlaybackStatus.PLAYING)
+        }
+    }
+    private val seekToPauseMusic = object: BroadcastReceiver(){
+        override fun onReceive(p0: Context, p1: Intent) {
+            val storage = StorageUtil(applicationContext)
+            resumePos = storage.loadSeekTime()
+
+            buildNotification(PlaybackStatus.PAUSE)
+        }
+    }
+    private fun registerBecomingNoisyReceiver(){
+        val intentFilter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+        registerReceiver(becomingNoisyReceiver, intentFilter)
+    }
+    private fun registerStartAudio(){
+        val filter = IntentFilter(MainActivity.Broadcast_PLAY)
+        registerReceiver(startMusic, filter)
+    }
+    private fun registerResumeAudio(){
+        val filter = IntentFilter(MainActivity.Broadcast_RESUME)
+        registerReceiver(resumeMusic, filter)
+    }
+    private fun registerPauseAudio(){
+        val filter = IntentFilter(MainActivity.Broadcast_PAUSE)
+        registerReceiver(pauseMusic, filter)
+    }
+    private fun registerSeekToPlayAudio(){
+        val filter = IntentFilter(MainActivity.Broadcast_SEEK_TO_PLAY)
+        registerReceiver(seekToPlayMusic, filter)
+    }
+    private fun registerSeekToPauseAudio(){
+        val filter = IntentFilter(MainActivity.Broadcast_SEEK_TO_PAUSE)
+        registerReceiver(seekToPauseMusic, filter)
+    }
+
     // 내부 클래스를 선언해줘야 외부 클래스를 참조하게 된다!
     inner class LocalBinder : Binder(){
         fun getService() : MediaPlayerService{
             Log.d("LifecycleCheck", "service getService")
             return this@MediaPlayerService
         }
+    }
+
+    override fun onBind(p0: Intent): IBinder {
+        return iBinder
+    }
+
+    override fun onDestroy() {
+        Log.d("LifecycleCheck", "service onDestroy")
+
+        super.onDestroy()
+        if(mediaPlayer != null){
+            stopMedia()
+            mediaPlayer!!.release()
+        }
+        removeAudioFocus()
+
+        //receiver 및 listener 해제
+        if(phoneStateListener != null){
+            telephonyManager.listen(phoneStateListener,
+                PhoneStateListener.LISTEN_NONE)
+        }
+
+        removeNotification()
+        unregisterReceivers()
+
+        //캐시 데이터 삭제
+        StorageUtil(applicationContext).clearCachedAudioPlaylist()
     }
 }
